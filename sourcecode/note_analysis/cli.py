@@ -35,8 +35,15 @@ def init(exam_dir: Path) -> None:
 @cli.command()
 @click.argument("exam_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
 def box(exam_dir: Path) -> None:
-    """CV 框选大题（待实现）"""
-    click.echo("框选功能待实现（Ticket 02）")
+    """CV 框选大题"""
+    from note_analysis.cv.engine import CVEngine
+
+    try:
+        CVEngine.process_exam(exam_dir)
+        click.echo("框选完成")
+    except FileNotFoundError as e:
+        click.echo(f"错误: {e}", err=True)
+        sys.exit(1)
 
 
 @cli.command()
