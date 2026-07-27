@@ -30,7 +30,7 @@ class QuestionBox(BaseModel):
     annotations: str = ""
     images: list[str] = []
     uncertainRegions: list[UncertainRegion] = []
-    reviewStatus: Literal["pending", "consistent", "inconsistent"] = "pending"
+    reviewStatus: Literal["pending", "consistent", "inconsistent", "uncertain"] = "pending"
     reviewNotes: str = ""
 
 

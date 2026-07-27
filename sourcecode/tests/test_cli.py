@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import cv2
 import numpy as np
@@ -167,6 +167,72 @@ def test_review_blocks_unconfirmed(mock_all_confirmed, tmp_path: Path) -> None:
     result = runner.invoke(cli, ["review", str(tmp_path)])
     assert result.exit_code != 0
     assert "未确认" in result.output
+
+
+@patch("note_analysis.agent.review.Reviewer.review")
+@patch("note_analysis.agent.uncertainty.UncertaintyResolver.all_confirmed")
+def test_review_command_success(
+    mock_all_confirmed: MagicMock,
+    mock_review: MagicMock,
+    tmp_path: Path,
+) -> None:
+    """review 命令成功执行"""
+    from note_analysis.models.models import BBox, Exam, QuestionBox
+    from note_analysis.models.serializer import Serializer
+
+    mock_all_confirmed.return_value = True
+    exam = Exam.create([str(tmp_path / "test.jpg")])
+    exam.boxes = [
+        QuestionBox(
+            id=1, bbox=BBox(x=0, y=0, w=100, h=100),
+            questionText="Q1", annotations="A1",
+            reviewStatus="consistent", reviewNotes="OK",
+        ),
+    ]
+    mock_review.return_value = exam
+    Serializer.save(exam, tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["review", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "审查完成" in result.output
+    assert "consistent" in result.output
+
+
+@patch("note_analysis.agent.review.Reviewer.review")
+@patch("note_analysis.agent.uncertainty.UncertaintyResolver.all_confirmed")
+def test_review_command_shows_summary(
+    mock_all_confirmed: MagicMock,
+    mock_review: MagicMock,
+    tmp_path: Path,
+) -> None:
+    """review 命令输出审查摘要"""
+    from note_analysis.models.models import BBox, Exam, QuestionBox
+    from note_analysis.models.serializer import Serializer
+
+    mock_all_confirmed.return_value = True
+    exam = Exam.create([str(tmp_path / "test.jpg")])
+    exam.boxes = [
+        QuestionBox(
+            id=1, bbox=BBox(x=0, y=0, w=100, h=100),
+            questionText="Q1", annotations="A1",
+            reviewStatus="consistent", reviewNotes="逻辑一致",
+        ),
+        QuestionBox(
+            id=2, bbox=BBox(x=0, y=100, w=100, h=100),
+            questionText="Q2", annotations="A2",
+            reviewStatus="inconsistent", reviewNotes="计算错误",
+        ),
+    ]
+    mock_review.return_value = exam
+    Serializer.save(exam, tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["review", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "审查完成" in result.output
+    assert "逻辑一致" in result.output
+    assert "计算错误" in result.output
 
 
 def test_help_subcommands():

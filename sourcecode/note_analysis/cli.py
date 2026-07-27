@@ -110,9 +110,9 @@ def uncertain(exam_dir: Path) -> None:
 @cli.command()
 @click.argument("exam_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
 def review(exam_dir: Path) -> None:
-    """Agent 调用 LLM 合理性审查（待实现）"""
+    """Agent 调用 LLM 合理性审查"""
+    from note_analysis.agent.review import Reviewer
     from note_analysis.agent.uncertainty import UncertaintyResolver
-    from note_analysis.models.serializer import Serializer
 
     try:
         json_files = Serializer.find_exam_files(exam_dir)
@@ -123,9 +123,20 @@ def review(exam_dir: Path) -> None:
         if not UncertaintyResolver.all_confirmed(exam):
             click.echo("错误: 尚有不确定区域未确认，请先运行 `serve` 完成确认", err=True)
             sys.exit(1)
-        click.echo("审查功能待实现（Ticket 06）")
+
+        r = Reviewer(exam_dir)
+        exam = r.review()
+        summary_lines = [f"审查完成: {len(exam.boxes)} 道题"]
+        for box in exam.boxes:
+            summary_lines.append(
+                f"  题目 #{box.id}: {box.reviewStatus} — {box.reviewNotes}"
+            )
+        click.echo("\n".join(summary_lines))
     except FileNotFoundError as e:
         click.echo(f"错误: {e}", err=True)
+        sys.exit(1)
+    except ValueError as e:
+        click.echo(f"审查错误: {e}", err=True)
         sys.exit(1)
 
 
