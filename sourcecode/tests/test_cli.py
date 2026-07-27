@@ -271,3 +271,42 @@ def test_render_with_data(tmp_path: Path) -> None:
     assert "HTML 笔记已生成" in result.output
     html_files = list(tmp_path.glob("笔记_*.html"))
     assert len(html_files) == 1
+
+
+@patch("note_analysis.agent.core.httpx.Client.post")
+def test_analyze_command(mock_post: MagicMock, tmp_path: Path) -> None:
+    """analyze 命令基本流程"""
+    from note_analysis.models.models import BBox, Exam, QuestionBox
+    from note_analysis.models.serializer import Serializer
+
+    mock_response = MagicMock()
+    mock_response.json.return_value = {
+        "content": [{"type": "text", "text": json.dumps({
+            "weakPoints": [
+                {"knowledgePoint": "导数", "errorCount": 1, "llmAdvice": "多练习"},
+            ]
+        })}]
+    }
+    mock_post.return_value = mock_response
+
+    exam = Exam.create([str(tmp_path / "test.jpg")])
+    exam.boxes = [
+        QuestionBox(id=1, bbox=BBox(x=0, y=0, w=100, h=100),
+                     questionText="Q1", annotations="A1",
+                     reviewStatus="inconsistent", reviewNotes="计算错误"),
+    ]
+    Serializer.save(exam, tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["analyze", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "分析完成" in result.output
+    assert "导数" in result.output
+
+
+def test_analyze_no_json(tmp_path: Path) -> None:
+    """analyze 命令无 JSON 时应提示"""
+    runner = CliRunner()
+    result = runner.invoke(cli, ["analyze", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "未找到试卷 JSON 文件" in result.output

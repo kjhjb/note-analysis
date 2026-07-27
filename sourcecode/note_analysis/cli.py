@@ -166,8 +166,24 @@ def render(exam_dir: Path, open_browser: bool) -> None:
 @cli.command()
 @click.argument("exams_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
 def analyze(exams_dir: Path) -> None:
-    """Agent 跨卷薄弱点分析（待实现）"""
-    click.echo("分析功能待实现（Ticket 07）")
+    """Agent 跨卷薄弱点分析"""
+    from note_analysis.analyzer.engine import Analyzer
+
+    try:
+        a = Analyzer(exams_dir)
+        exams = a.analyze()
+        if not exams:
+            click.echo("未找到试卷 JSON 文件")
+            return
+        click.echo(f"分析完成: {len(exams)} 份试卷")
+        for exam in exams:
+            click.echo(f"  试卷 {exam.examId}: {len(exam.weakPoints)} 个薄弱点")
+            for wp in exam.weakPoints:
+                click.echo(f"    - {wp.knowledgePoint} (错误频次: {wp.errorCount})")
+                click.echo(f"      建议: {wp.llmAdvice}")
+    except (FileNotFoundError, ValueError) as e:
+        click.echo(f"错误: {e}", err=True)
+        sys.exit(1)
 
 
 def main() -> None:
