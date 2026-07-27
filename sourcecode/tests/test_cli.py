@@ -240,3 +240,34 @@ def test_help_subcommands():
     for cmd in ["box", "serve", "recognize", "uncertain", "review", "render", "analyze"]:
         result = runner.invoke(cli, [cmd, "--help"])
         assert result.exit_code == 0
+
+
+def test_render_no_json(tmp_path: Path) -> None:
+    runner = CliRunner()
+    result = runner.invoke(cli, ["render", str(tmp_path)])
+    assert result.exit_code != 0
+
+
+def test_render_with_data(tmp_path: Path) -> None:
+    from note_analysis.models.models import BBox, Exam, QuestionBox
+    from note_analysis.models.serializer import Serializer
+
+    img = np.ones((400, 600, 3), dtype=np.uint8) * 255
+    cv2.putText(img, "Test", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
+    cv2.imwrite(str(tmp_path / "exam.jpg"), img)
+
+    exam = Exam.create([str(tmp_path / "exam.jpg")])
+    exam.boxes = [
+        QuestionBox(
+            id=1, bbox=BBox(x=0, y=0, w=100, h=100),
+            questionText="测试题", annotations="笔记",
+        ),
+    ]
+    Serializer.save(exam, tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["render", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "HTML 笔记已生成" in result.output
+    html_files = list(tmp_path.glob("笔记_*.html"))
+    assert len(html_files) == 1

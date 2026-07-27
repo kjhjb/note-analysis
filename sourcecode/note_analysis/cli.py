@@ -142,9 +142,25 @@ def review(exam_dir: Path) -> None:
 
 @cli.command()
 @click.argument("exam_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
-def render(exam_dir: Path) -> None:
-    """Agent 调用学霸笔记 skill 渲染 HTML（待实现）"""
-    click.echo("渲染功能待实现（Ticket 06）")
+@click.option(
+    "--open/--no-open",
+    "open_browser",
+    default=True,
+    help="渲染后自动在浏览器中打开预览（默认打开）",
+)
+def render(exam_dir: Path, open_browser: bool) -> None:
+    """基于学霸笔记 skill 模板渲染 HTML 笔记页"""
+    from note_analysis.renderer.engine import NoteRenderer
+
+    try:
+        r = NoteRenderer(exam_dir)
+        output_path = r.save(open_browser=open_browser)
+        click.echo(f"HTML 笔记已生成: {output_path}")
+        if open_browser:
+            click.echo("已在浏览器中打开预览")
+    except (FileNotFoundError, ValueError) as e:
+        click.echo(f"错误: {e}", err=True)
+        sys.exit(1)
 
 
 @cli.command()
