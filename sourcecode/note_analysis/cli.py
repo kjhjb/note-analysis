@@ -50,7 +50,13 @@ def box(exam_dir: Path) -> None:
 @click.argument("exam_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
 def serve(exam_dir: Path) -> None:
     """启动 Web UI（框选微调 + 不确定确认）"""
-    click.echo("Web UI 待实现（Ticket 03）")
+    from note_analysis.web.server import run_server
+
+    try:
+        run_server(exam_dir)
+    except FileNotFoundError as e:
+        click.echo(f"错误: {e}", err=True)
+        sys.exit(1)
 
 
 @cli.command()

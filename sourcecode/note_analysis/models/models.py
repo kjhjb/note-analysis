@@ -25,6 +25,7 @@ class UncertainRegion(BaseModel):
 class QuestionBox(BaseModel):
     id: int
     bbox: BBox
+    photoIndex: int = 0
     questionText: str = ""
     annotations: str = ""
     images: list[str] = []

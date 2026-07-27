@@ -133,7 +133,7 @@ class CVEngine:
 
         import sys
 
-        for photo_path in exam.photos:
+        for photo_idx, photo_path in enumerate(exam.photos):
             img = cv2.imread(photo_path)
             if img is None:
                 print(f"警告: 无法读取图片 {photo_path}，已跳过", file=sys.stderr)
@@ -147,7 +147,7 @@ class CVEngine:
             engine.draw_preview(boxes, str(preview_path))
 
             for bbox in boxes:
-                all_boxes.append(QuestionBox(id=box_id, bbox=bbox))
+                all_boxes.append(QuestionBox(id=box_id, bbox=bbox, photoIndex=photo_idx))
                 box_id += 1
 
         exam.boxes = all_boxes
