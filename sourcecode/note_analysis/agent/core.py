@@ -22,7 +22,7 @@ class Agent:
         self.api_url = (api_url or os.environ.get("LLM_API_URL", "")).rstrip("/")
         self.model = model
         self.max_tokens = max_tokens
-        self._messages: list[dict[str, str]] = []
+        self._messages: list[dict[str, Any]] = []
         self._client = httpx.Client(timeout=120)
 
     def _ensure_url(self) -> str:
@@ -43,6 +43,9 @@ class Agent:
         return result
 
     def add_message(self, role: str, content: str) -> None:
+        self._messages.append({"role": role, "content": content})
+
+    def add_message_blocks(self, role: str, content: list[dict[str, Any]]) -> None:
         self._messages.append({"role": role, "content": content})
 
     def clear_context(self) -> None:

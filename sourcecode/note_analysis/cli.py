@@ -61,9 +61,29 @@ def serve(exam_dir: Path) -> None:
 
 @cli.command()
 @click.argument("exam_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
-def recognize(exam_dir: Path) -> None:
-    """Agent 调用 LLM 识别（待实现）"""
-    click.echo("识别功能待实现（Ticket 04）")
+@click.option(
+    "--threshold",
+    default=0.8,
+    type=float,
+    help="置信度阈值（低于此值的区域标记为不确定，默认 0.8）",
+)
+def recognize(exam_dir: Path, threshold: float) -> None:
+    """Agent 调用 LLM 识别"""
+    from note_analysis.agent.recognizer import Recognizer
+
+    try:
+        r = Recognizer(exam_dir, threshold=threshold)
+        exam = r.recognize()
+        click.echo(f"识别完成: {len(exam.boxes)} 道题")
+        uncertain_count = sum(len(b.uncertainRegions) for b in exam.boxes)
+        if uncertain_count:
+            click.echo(f"标记了 {uncertain_count} 个不确定区域")
+    except FileNotFoundError as e:
+        click.echo(f"错误: {e}", err=True)
+        sys.exit(1)
+    except ValueError as e:
+        click.echo(f"识别错误: {e}", err=True)
+        sys.exit(1)
 
 
 @cli.command()
