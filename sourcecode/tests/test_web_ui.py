@@ -5,7 +5,7 @@ import cv2
 import numpy as np
 from fastapi.testclient import TestClient
 
-from note_analysis.models.models import BBox, Exam, QuestionBox
+from note_analysis.models.models import BBox, Exam, QuestionBox, UncertainRegion
 from note_analysis.models.serializer import Serializer
 from note_analysis.web.server import _create_app, _find_free_port
 
@@ -129,6 +129,116 @@ class TestApp:
         assert "42" in response.text
         assert "10" in response.text
         assert "200" in response.text
+
+
+class TestUncertainPage:
+    def test_uncertain_page_loads(self, tmp_path: Path) -> None:
+        exam = Exam.create([str(tmp_path / "test.jpg")])
+        app = _create_app(exam, tmp_path)
+        client = TestClient(app)
+        response = client.get("/uncertain")
+        assert response.status_code == 200
+        assert "text/html" in response.headers["content-type"]
+        assert "不确定区域确认" in response.text
+
+    def test_uncertain_page_shows_regions(self, tmp_path: Path) -> None:
+        exam = Exam.create([str(tmp_path / "test.jpg")])
+        ur = UncertainRegion(bbox=BBox(x=10, y=10, w=60, h=25), llmGuess="sin(x)", llmConfidence=0.65)
+        exam.boxes = [
+            QuestionBox(id=1, bbox=BBox(x=0, y=0, w=400, h=300), uncertainRegions=[ur], questionText="求 f(x)")
+        ]
+        app = _create_app(exam, tmp_path)
+        client = TestClient(app)
+        response = client.get("/uncertain")
+        assert "sin(x)" in response.text
+        assert "求 f(x)" in response.text
+        assert "65%" in response.text or "65" in response.text
+
+    def test_uncertain_page_all_confirmed(self, tmp_path: Path) -> None:
+        exam = Exam.create([str(tmp_path / "test.jpg")])
+        ur = UncertainRegion(
+            bbox=BBox(x=10, y=10, w=60, h=25), llmGuess="sin(x)", llmConfidence=0.65, userConfirmed="sin(x)"
+        )
+        exam.boxes = [
+            QuestionBox(id=1, bbox=BBox(x=0, y=0, w=400, h=300), uncertainRegions=[ur])
+        ]
+        app = _create_app(exam, tmp_path)
+        client = TestClient(app)
+        response = client.get("/uncertain")
+        assert "全部已确认" in response.text or "100" in response.text or "已确认" in response.text
+
+    def test_uncertain_region_image_not_found(self, tmp_path: Path) -> None:
+        exam = Exam.create([str(tmp_path / "test.jpg")])
+        app = _create_app(exam, tmp_path)
+        client = TestClient(app)
+        response = client.get("/api/uncertain-region-image/999/0")
+        assert response.status_code == 404
+
+    def test_uncertain_region_image_bad_index(self, tmp_path: Path) -> None:
+        exam = Exam.create([str(tmp_path / "test.jpg")])
+        app = _create_app(exam, tmp_path)
+        client = TestClient(app)
+        response = client.get("/api/uncertain-region-image/1/99")
+        assert response.status_code == 404
+
+    def test_confirm_uncertain_regions(self, tmp_path: Path) -> None:
+        exam = Exam.create([str(tmp_path / "test.jpg")])
+        ur = UncertainRegion(bbox=BBox(x=10, y=10, w=60, h=25), llmGuess="sin(x)", llmConfidence=0.65)
+        exam.boxes = [
+            QuestionBox(id=1, bbox=BBox(x=0, y=0, w=400, h=300), uncertainRegions=[ur])
+        ]
+        Serializer.save(exam, tmp_path)
+
+        app = _create_app(exam, tmp_path)
+        client = TestClient(app)
+        response = client.post(
+            "/api/exam/uncertain-regions/confirm",
+            json={"confirmations": [{"boxId": 1, "urIndex": 0, "userConfirmed": "cos(x)"}]},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "ok"
+
+    def test_confirm_persists_to_json(self, tmp_path: Path) -> None:
+        exam = Exam.create([str(tmp_path / "test.jpg")])
+        ur = UncertainRegion(bbox=BBox(x=10, y=10, w=60, h=25), llmGuess="sin(x)", llmConfidence=0.65)
+        exam.boxes = [
+            QuestionBox(id=1, bbox=BBox(x=0, y=0, w=400, h=300), uncertainRegions=[ur])
+        ]
+        app = _create_app(exam, tmp_path)
+        client = TestClient(app)
+        client.post(
+            "/api/exam/uncertain-regions/confirm",
+            json={"confirmations": [{"boxId": 1, "urIndex": 0, "userConfirmed": "sin(x)"}]},
+        )
+
+        json_files = Serializer.find_exam_files(tmp_path)
+        loaded = Serializer.load(json_files[0])
+        assert loaded.boxes[0].uncertainRegions[0].userConfirmed == "sin(x)"
+
+    def test_confirm_multiple_regions(self, tmp_path: Path) -> None:
+        exam = Exam.create([str(tmp_path / "test.jpg")])
+        ur1 = UncertainRegion(bbox=BBox(x=10, y=10, w=60, h=25), llmGuess="guess1", llmConfidence=0.6)
+        ur2 = UncertainRegion(bbox=BBox(x=80, y=10, w=40, h=20), llmGuess="guess2", llmConfidence=0.7)
+        exam.boxes = [
+            QuestionBox(id=1, bbox=BBox(x=0, y=0, w=400, h=300), uncertainRegions=[ur1, ur2])
+        ]
+        app = _create_app(exam, tmp_path)
+        client = TestClient(app)
+        client.post(
+            "/api/exam/uncertain-regions/confirm",
+            json={
+                "confirmations": [
+                    {"boxId": 1, "urIndex": 0, "userConfirmed": "confirmed1"},
+                    {"boxId": 1, "urIndex": 1, "userConfirmed": "__IGNORED__"},
+                ]
+            },
+        )
+
+        json_files = Serializer.find_exam_files(tmp_path)
+        loaded = Serializer.load(json_files[0])
+        assert loaded.boxes[0].uncertainRegions[0].userConfirmed == "confirmed1"
+        assert loaded.boxes[0].uncertainRegions[1].userConfirmed == "__IGNORED__"
 
 
 class TestCliServe:

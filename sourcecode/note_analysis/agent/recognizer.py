@@ -124,7 +124,7 @@ class Recognizer:
         content = self._build_multimodal_content(boxes_data)
         self.agent.add_message_blocks("user", content)
         result = self.agent.call(system_prompt=SYSTEM_PROMPT)
-        self.agent._messages.pop()
+        self.agent.pop_message()
         return result
 
     @staticmethod

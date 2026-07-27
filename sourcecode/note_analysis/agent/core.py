@@ -48,6 +48,11 @@ class Agent:
     def add_message_blocks(self, role: str, content: list[dict[str, Any]]) -> None:
         self._messages.append({"role": role, "content": content})
 
+    def pop_message(self) -> dict[str, Any] | None:
+        if not self._messages:
+            return None
+        return self._messages.pop()
+
     def clear_context(self) -> None:
         self._messages.clear()
 

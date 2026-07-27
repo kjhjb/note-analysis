@@ -9,9 +9,9 @@ from typing import Any
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 
-from note_analysis.models.models import Exam, QuestionBox
+from note_analysis.models.models import BBox, Exam, QuestionBox
 from note_analysis.models.serializer import Serializer
 
 
@@ -62,6 +62,7 @@ h1 {{ font-size:20px; margin-bottom:12px; }}
 <button id="addBtn">+ 添加框</button>
 <button id="delBtn" class="danger">- 删除框</button>
 <button id="doneBtn" class="primary">&#10003; 确认并保存</button>
+<a href="/uncertain" target="_blank" style="margin-left:8px;font-size:13px;color:#1890ff;">处理不确定区域 &#8599;</a>
 </div>
 <div id="canvasContainer">
 <canvas id="canvas"></canvas>
@@ -333,12 +334,263 @@ window.addEventListener('resize', function() {{ if (state.image) fitAndRender();
 </html>"""
 
 
+def _build_uncertain_html(exam: Exam) -> str:
+    exam_data = {"examId": exam.examId, "photoCount": len(exam.photos)}
+    boxes_json = json.dumps(
+        [
+            {
+                "id": b.id,
+                "questionText": b.questionText[:100] if b.questionText else "",
+                "photoIndex": b.photoIndex,
+                "uncertainRegions": [
+                    {
+                        "index": ui,
+                        "bbox": ur.bbox.model_dump(),
+                        "llmGuess": ur.llmGuess,
+                        "llmConfidence": ur.llmConfidence,
+                        "userConfirmed": ur.userConfirmed,
+                    }
+                    for ui, ur in enumerate(b.uncertainRegions)
+                ],
+            }
+            for b in exam.boxes
+            if b.uncertainRegions
+        ],
+        ensure_ascii=False,
+    )
+    exam_json = json.dumps(exam_data, ensure_ascii=False)
+
+    return f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>不确定区域确认 - 笔记分析工具</title>
+<style>
+* {{ margin: 0; padding: 0; box-sizing: border-box; }}
+body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #333; }}
+#app {{ max-width: 900px; margin: 0 auto; padding: 16px; }}
+h1 {{ font-size: 20px; margin-bottom: 4px; }}
+#header {{ display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }}
+#header a {{ font-size: 13px; color: #1890ff; text-decoration: none; }}
+#header a:hover {{ text-decoration: underline; }}
+#summary {{ font-size: 14px; color: #666; margin-bottom: 12px; }}
+.card {{ background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 16px; margin-bottom: 12px; }}
+.card-header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }}
+.card-title {{ font-size: 14px; font-weight: 600; color: #333; }}
+.card-context {{ font-size: 12px; color: #888; margin-bottom: 8px; }}
+.img-container {{ text-align: center; margin-bottom: 10px; }}
+.img-container img {{ max-width: 100%; border: 1px solid #ddd; border-radius: 4px; }}
+.guess {{ background: #fffbe6; border: 1px solid #ffe58f; border-radius: 4px; padding: 8px 10px; margin-bottom: 10px; }}
+.guess-label {{ font-weight: 600; color: #d48806; }}
+.guess-text {{ color: #333; margin: 2px 0; }}
+.guess-conf {{ font-size: 11px; color: #999; }}
+.actions {{ display: flex; gap: 8px; flex-wrap: wrap; }}
+.actions button {{ padding: 6px 14px; border: 1px solid #d9d9d9; border-radius: 4px; cursor: pointer; }}
+.actions button:hover {{ border-color: #1890ff; color: #1890ff; }}
+.actions button.primary {{ background: #1890ff; color: #fff; border-color: #1890ff; }}
+.actions button.primary:hover {{ background: #40a9ff; }}
+.actions button.success {{ background: #52c41a; color: #fff; border-color: #52c41a; }}
+.actions button.success:hover {{ background: #73d13d; }}
+.actions button.danger {{ color: #ff4d4f; border-color: #ff4d4f; }}
+.actions button.danger:hover {{ background: #fff2f0; }}
+.actions button:disabled {{ opacity: 0.5; cursor: not-allowed; }}
+.edit-input {{ display: none; margin-top: 8px; }}
+.edit-input input {{ width: 100%; padding: 6px 10px; border: 1px solid #d9d9d9; border-radius: 4px; outline: none; }}
+.edit-input input:focus {{ border-color: #1890ff; }}
+.edit-input.show {{ display: block; }}
+#saveBar {{ position: sticky; bottom: 0; background: #fff; border-top: 1px solid #e0e0e0; padding: 12px 16px; }}
+#saveBar button {{ padding: 8px 24px; border-radius: 4px; font-size: 14px; cursor: pointer; }}
+#saveBtn {{ background: #1890ff; color: #fff; border: none; }}
+#saveBtn:hover {{ background: #40a9ff; }}
+#saveBtn:disabled {{ opacity: 0.6; cursor: not-allowed; }}
+#statusText {{ font-size: 13px; color: #666; }}
+.status-confirmed {{ color: #52c41a; font-size: 12px; }}
+.status-pending {{ color: #faad14; font-size: 12px; }}
+</style>
+</head>
+<body>
+<div id="app">
+<div id="header">
+<h1>不确定区域确认</h1>
+<a href="/" target="_blank">打开框选微调 &#8599;</a>
+</div>
+<div id="summary">共 <span id="totalCount">0</span> 个不确定区域，<span id="confirmedCount">0</span> 个已确认</div>
+<div id="cards"></div>
+<div id="saveBar">
+<span id="statusText"></span>
+<button id="saveBtn" disabled>保存确认</button>
+</div>
+</div>
+<script>
+(function() {{
+const EXAM = {exam_json};
+const BOXES = {boxes_json};
+
+const state = {{
+  items: [],
+  pendingCount: 0,
+}};
+
+BOXES.forEach(box => {{
+  box.uncertainRegions.forEach(ur => {{
+    state.items.push({{
+      boxId: box.id,
+      urIndex: ur.index,
+      questionText: box.questionText,
+      photoIndex: box.photoIndex,
+      bbox: ur.bbox,
+      llmGuess: ur.llmGuess,
+      llmConfidence: ur.llmConfidence,
+      userConfirmed: ur.userConfirmed || null,
+      action: ur.userConfirmed ? 'accepted' : null,
+      editText: '',
+    }});
+  }});
+}});
+
+function updateCounts() {{
+  const total = state.items.length;
+  const confirmed = state.items.filter(i => i.userConfirmed !== null).length;
+  document.getElementById('totalCount').textContent = total;
+  document.getElementById('confirmedCount').textContent = confirmed;
+  const saveBtn = document.getElementById('saveBtn');
+  const allConfirmed = confirmed === total;
+  saveBtn.disabled = allConfirmed;
+  saveBtn.textContent = allConfirmed ? '全部已确认' : '保存确认';
+  document.getElementById('statusText').textContent =
+    allConfirmed ? '所有不确定区域已确认，可以进入下一步' : '尚有不确定区域待处理';
+}}
+
+function render() {{
+  const container = document.getElementById('cards');
+  container.innerHTML = '';
+  state.items.forEach((item, idx) => {{
+    const confirmed = item.userConfirmed !== null;
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <div class="card-header">
+        <span class="card-title">题目 #${{item.boxId}}</span>
+        <span class="${{confirmed ? 'status-confirmed' : 'status-pending'}}">
+          ${{confirmed ? '&#10003; 已确认' : '待确认'}}
+        </span>
+      </div>
+      <div class="card-context">${{item.questionText || '(无上下文)'}}</div>
+      <div class="img-container">
+        <img src="/api/uncertain-region-image/${{item.boxId}}/${{item.urIndex}}"
+             alt="不确定区域" style="max-height:120px"
+             onerror="this.alt='加载失败';this.style.display='none'">
+      </div>
+      <div class="guess">
+        <div class="guess-label">LLM 猜测</div>
+        <div class="guess-text">${{item.llmGuess}}</div>
+        <div class="guess-conf">置信度: ${{(item.llmConfidence * 100).toFixed(0)}}%</div>
+      </div>
+      ${{confirmed ? (
+        '<div class="guess" style="background:#f6ffed;border-color:#b7eb8f">' +
+        '<div class="guess-label" style="color:#52c41a">已确认文字</div>' +
+        '<div class="guess-text">' + item.userConfirmed + '</div></div>'
+      ) : ''}}
+      <div class="actions" data-idx="${{idx}}">
+        <button class="${{confirmed ? 'success' : 'primary'}}" data-action="accept" ${{confirmed ? 'disabled' : ''}}>
+          ${{confirmed ? '&#10003; 已接受' : '接受猜测'}}
+        </button>
+        <button data-action="edit" ${{confirmed ? 'disabled' : ''}}>手动输入</button>
+        <button class="danger" data-action="ignore" ${{confirmed ? 'disabled' : ''}}>忽略此区域</button>
+      </div>
+      <div class="edit-input ${{item.action === 'edit' ? 'show' : ''}}" data-idx="${{idx}}">
+        <input type="text" placeholder="输入正确的文字内容..." value="${{item.editText}}">
+        <div style="margin-top:4px;display:flex;gap:6px">
+          <button class="primary" style="padding:4px 12px;font-size:12px" data-action="confirm-edit">确认</button>
+          <button style="padding:4px 12px;font-size:12px" data-action="cancel-edit">取消</button>
+        </div>
+      </div>
+    `;
+    container.appendChild(card);
+  }});
+  updateCounts();
+}}
+
+document.getElementById('cards').addEventListener('click', function(e) {{
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  const idx = parseInt(btn.closest('[data-idx]')?.dataset.idx);
+  if (isNaN(idx)) return;
+  const action = btn.dataset.action;
+  const item = state.items[idx];
+
+  if (action === 'accept') {{
+    item.userConfirmed = item.llmGuess;
+    item.action = 'accepted';
+    render();
+  }} else if (action === 'edit') {{
+    item.action = 'edit';
+    render();
+    const container = document.querySelectorAll('.edit-input')[idx];
+    if (container) {{
+      container.querySelector('input').focus();
+    }}
+  }} else if (action === 'ignore') {{
+    item.userConfirmed = '__IGNORED__';
+    item.action = 'ignored';
+    render();
+  }} else if (action === 'confirm-edit') {{
+    const container = btn.closest('.edit-input');
+    const input = container.querySelector('input');
+    if (input.value.trim()) {{
+      item.userConfirmed = input.value.trim();
+      item.action = 'edited';
+      render();
+    }}
+  }} else if (action === 'cancel-edit') {{
+    item.action = null;
+    render();
+  }}
+}});
+
+document.getElementById('saveBtn').addEventListener('click', async function() {{
+  const saveBtn = document.getElementById('saveBtn');
+  saveBtn.disabled = true;
+  saveBtn.textContent = '保存中...';
+  const confirmations = state.items
+    .filter(i => i.userConfirmed !== null)
+    .map(i => ({{
+      boxId: i.boxId,
+      urIndex: i.urIndex,
+      userConfirmed: i.userConfirmed,
+    }}));
+  try {{
+    const res = await fetch('/api/exam/uncertain-regions/confirm', {{
+      method: 'POST',
+      headers: {{ 'Content-Type': 'application/json' }},
+      body: JSON.stringify({{ confirmations }}),
+    }});
+    if (!res.ok) throw new Error('保存失败');
+    saveBtn.textContent = '保存成功';
+  }} catch (err) {{
+    saveBtn.textContent = '保存失败，请重试';
+    saveBtn.disabled = false;
+  }}
+}});
+
+render();
+}})();
+</script>
+</body>
+</html>"""
+
+
 def _create_app(exam: Exam, exam_dir: Path) -> FastAPI:
     app = FastAPI()
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> str:
         return _build_html(exam)
+
+    @app.get("/uncertain", response_class=HTMLResponse)
+    async def uncertain_page() -> str:
+        return _build_uncertain_html(exam)
 
     @app.get("/api/exam")
     async def get_exam() -> dict[str, Any]:
@@ -350,6 +602,29 @@ def _create_app(exam: Exam, exam_dir: Path) -> FastAPI:
             return FileResponse(exam.photos[index])
         raise HTTPException(status_code=404, detail="Photo not found")
 
+    @app.get("/api/uncertain-region-image/{box_id}/{ur_index}")
+    async def get_uncertain_region_image(box_id: int, ur_index: int) -> Response:
+        for box in exam.boxes:
+            if box.id != box_id:
+                continue
+            if 0 <= ur_index < len(box.uncertainRegions):
+                from note_analysis.agent.recognizer import crop_bbox_from_image, image_to_base64
+
+                ur = box.uncertainRegions[ur_index]
+                orig_bbox = BBox(
+                    x=box.bbox.x + ur.bbox.x,
+                    y=box.bbox.y + ur.bbox.y,
+                    w=ur.bbox.w,
+                    h=ur.bbox.h,
+                )
+                cropped = crop_bbox_from_image(exam.photos[box.photoIndex], orig_bbox)
+                b64 = image_to_base64(cropped)
+                import base64
+
+                decoded = base64.b64decode(b64)
+                return Response(content=decoded, media_type="image/jpeg")
+        raise HTTPException(status_code=404, detail="Uncertain region not found")
+
     @app.put("/api/exam/boxes")
     async def update_boxes(data: dict[str, Any]) -> dict[str, str]:
         boxes_data = data.get("boxes", [])
@@ -358,6 +633,23 @@ def _create_app(exam: Exam, exam_dir: Path) -> FastAPI:
             if "bbox" not in b:
                 raise HTTPException(status_code=422, detail="Each box must have a bbox field")
             exam.boxes.append(QuestionBox(**b))
+        Serializer.save(exam, exam_dir)
+        return {"status": "ok"}
+
+    @app.post("/api/exam/uncertain-regions/confirm")
+    async def confirm_uncertain_regions(data: dict[str, Any]) -> dict[str, str]:
+        confirmations: list[dict[str, Any]] = data.get("confirmations", [])
+        for conf in confirmations:
+            box_id: int | None = conf.get("boxId")
+            ur_index: int | None = conf.get("urIndex")
+            user_confirmed: str | None = conf.get("userConfirmed")
+            if box_id is None or ur_index is None:
+                continue
+            for box in exam.boxes:
+                if box.id != box_id:
+                    continue
+                if 0 <= ur_index < len(box.uncertainRegions):
+                    box.uncertainRegions[ur_index].userConfirmed = user_confirmed
         Serializer.save(exam, exam_dir)
         return {"status": "ok"}
 

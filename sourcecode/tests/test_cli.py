@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import cv2
 import numpy as np
@@ -132,8 +133,44 @@ def test_init_unreadable_directory():
     assert result.exit_code != 0
 
 
+@patch("note_analysis.agent.uncertainty.UncertaintyResolver.resolve")
+def test_uncertain_command(mock_resolve, tmp_path: Path) -> None:
+    """uncertain 命令基本流程"""
+    from note_analysis.models.models import Exam
+    from note_analysis.models.serializer import Serializer
+
+    exam = Exam.create([str(tmp_path / "test.jpg")])
+    Serializer.save(exam, tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["uncertain", str(tmp_path)])
+    assert result.exit_code == 0
+
+
+def test_uncertain_no_json(tmp_path: Path) -> None:
+    runner = CliRunner()
+    result = runner.invoke(cli, ["uncertain", str(tmp_path)])
+    assert result.exit_code != 0
+
+
+@patch("note_analysis.agent.uncertainty.UncertaintyResolver.all_confirmed")
+def test_review_blocks_unconfirmed(mock_all_confirmed, tmp_path: Path) -> None:
+    """review 命令在未确认不确定区域时应报错"""
+    from note_analysis.models.models import Exam
+    from note_analysis.models.serializer import Serializer
+
+    mock_all_confirmed.return_value = False
+    exam = Exam.create([str(tmp_path / "test.jpg")])
+    Serializer.save(exam, tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["review", str(tmp_path)])
+    assert result.exit_code != 0
+    assert "未确认" in result.output
+
+
 def test_help_subcommands():
     runner = CliRunner()
-    for cmd in ["box", "serve", "recognize", "review", "render", "analyze"]:
+    for cmd in ["box", "serve", "recognize", "uncertain", "review", "render", "analyze"]:
         result = runner.invoke(cli, [cmd, "--help"])
         assert result.exit_code == 0

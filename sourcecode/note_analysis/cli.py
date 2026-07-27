@@ -49,7 +49,7 @@ def box(exam_dir: Path) -> None:
 @cli.command()
 @click.argument("exam_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
 def serve(exam_dir: Path) -> None:
-    """启动 Web UI（框选微调 + 不确定确认）"""
+    """启动 Web UI（框选微调 + 不确定区域确认）"""
     from note_analysis.web.server import run_server
 
     try:
@@ -88,9 +88,45 @@ def recognize(exam_dir: Path, threshold: float) -> None:
 
 @cli.command()
 @click.argument("exam_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
+def uncertain(exam_dir: Path) -> None:
+    """Agent 调用 LLM 对不确定区域生成更精确的文本猜测"""
+    from note_analysis.agent.uncertainty import UncertaintyResolver
+
+    try:
+        r = UncertaintyResolver(exam_dir)
+        exam = r.resolve()
+        total = sum(len(b.uncertainRegions) for b in exam.boxes)
+        click.echo(f"不确定区域处理完成: {total} 个区域")
+        if total:
+            click.echo("请运行 `serve` 命令在 Web UI 中确认")
+    except FileNotFoundError as e:
+        click.echo(f"错误: {e}", err=True)
+        sys.exit(1)
+    except ValueError as e:
+        click.echo(f"处理错误: {e}", err=True)
+        sys.exit(1)
+
+
+@cli.command()
+@click.argument("exam_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
 def review(exam_dir: Path) -> None:
     """Agent 调用 LLM 合理性审查（待实现）"""
-    click.echo("审查功能待实现（Ticket 05）")
+    from note_analysis.agent.uncertainty import UncertaintyResolver
+    from note_analysis.models.serializer import Serializer
+
+    try:
+        json_files = Serializer.find_exam_files(exam_dir)
+        if not json_files:
+            click.echo("错误: 未找到 JSON 文件", err=True)
+            sys.exit(1)
+        exam = Serializer.load(json_files[0])
+        if not UncertaintyResolver.all_confirmed(exam):
+            click.echo("错误: 尚有不确定区域未确认，请先运行 `serve` 完成确认", err=True)
+            sys.exit(1)
+        click.echo("审查功能待实现（Ticket 06）")
+    except FileNotFoundError as e:
+        click.echo(f"错误: {e}", err=True)
+        sys.exit(1)
 
 
 @cli.command()
