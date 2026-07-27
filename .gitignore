@@ -1,28 +1,5 @@
-# Python
 __pycache__/
-*.py[cod]
-*.pyo
+*.pyc
 *.egg-info/
-dist/
-build/
-
-# Environment
-.env
-.venv
-venv/
-env/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Cache
-.mypy_cache/
 .pytest_cache/
-.ruff_cache/
-
-# Project specific
-note-skill-temp/
-note-skill-main.zip
+.env
