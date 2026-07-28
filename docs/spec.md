@@ -98,8 +98,32 @@
 
 - 所有 LLM 调用使用 **Anthropic Messages API 格式**（`/v1/messages`）
 - 兼容 Anthropic Claude、或任何提供 Anthropic 兼容接口的服务
-- API Key 通过环境变量或配置文件传入
 - 模型支持：Claude Sonnet 4 / GPT-4o 等（通过兼容层切换）
+
+### 配置方式（优先级：构造参数 > .env 文件 > 环境变量）
+
+1. **构造参数**：`Agent(api_key="...", api_url="...")` 直接传入
+2. **`.env` 文件**：CLI 全局 `--env-file` 选项指定 `.env` 文件路径（如 `.env`、`config/.env` 等）
+3. **环境变量**：`LLM_API_KEY` / `LLM_API_URL`
+
+支持配置的变量：
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `LLM_API_KEY` | Anthropic 兼容 API Key | `""` |
+| `LLM_API_URL` | Anthropic 兼容 API 地址 | `https://api.anthropic.com` |
+| `NOTE_SKILL_ROOT` | 学霸笔记模板目录 | 内置默认路径 |
+
+使用示例：
+
+```bash
+# .env 文件内容
+LLM_API_KEY=sk-ant-xxx
+LLM_API_URL=https://api.anthropic.com
+
+# CLI 调用
+python main.py --env-file .env pipeline ./my-exam
+```
 
 ### 数据结构 (Pydantic Schema)
 
@@ -147,6 +171,14 @@ class WeakPoint(BaseModel):
 ```
 
 ### CLI 子命令
+
+全局选项（位于子命令之前）：
+
+```
+--env-file PATH  .env 配置文件路径（可配置 LLM_API_KEY、LLM_API_URL 等）
+```
+
+子命令：
 
 ```
 main.py init <exam-dir>          # 扫描照片生成初始 JSON

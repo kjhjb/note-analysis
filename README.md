@@ -29,11 +29,28 @@ pip install -r requirements.txt
 
 ### 配置
 
-设置 LLM API（Anthropic 兼容协议）：
+支持三种配置方式（优先级：构造参数 > `.env` 文件 > 环境变量）：
+
+#### 方式 1：`.env` 文件（推荐）
+
+在项目目录创建 `.env` 文件：
+
+```
+LLM_API_KEY=sk-ant-xxx
+LLM_API_URL=https://api.anthropic.com
+```
+
+然后 CLI 全局 `--env-file` 选项加载：
+
+```bash
+python main.py --env-file .env pipeline ./my-exam
+```
+
+#### 方式 2：环境变量
 
 ```bash
 set LLM_API_KEY=your-api-key
-set LLM_API_URL=https://api.anthropic.com  # 可选，默认 Anthropic
+set LLM_API_URL=https://api.anthropic.com
 ```
 
 ### 一键流水线

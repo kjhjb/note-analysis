@@ -2,14 +2,24 @@ import sys
 from pathlib import Path
 
 import click
+from dotenv import load_dotenv
 
 from note_analysis.models.models import Exam
 from note_analysis.models.serializer import Serializer
 
 
 @click.group()
-def cli() -> None:
+@click.option(
+    "--env-file",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help=".env 配置文件路径（可配置 LLM_API_KEY、LLM_API_URL 等）",
+)
+@click.pass_context
+def cli(ctx: click.Context, env_file: Path | None) -> None:
     """笔记分析工具 — 自动将试卷照片整理为手写风格笔记"""
+    if env_file is not None:
+        load_dotenv(env_file)
 
 
 @cli.command()

@@ -310,3 +310,37 @@ def test_analyze_no_json(tmp_path: Path) -> None:
     result = runner.invoke(cli, ["analyze", str(tmp_path)])
     assert result.exit_code == 0
     assert "未找到试卷 JSON 文件" in result.output
+
+
+def test_cli_env_file_option(tmp_path: Path) -> None:
+    """--env-file 选项应正常解析"""
+    env_file = tmp_path / ".env.test"
+    env_file.write_text("LLM_API_KEY=test-key-from-file", encoding="utf-8")
+    runner = CliRunner()
+    result = runner.invoke(cli, ["--env-file", str(env_file), "init", str(tmp_path)])
+    assert result.exit_code == 1
+
+
+def test_cli_env_file_not_found(tmp_path: Path) -> None:
+    """--env-file 指定不存在的文件应报错"""
+    runner = CliRunner()
+    result = runner.invoke(cli, ["--env-file", str(tmp_path / "nonexistent.env"), "init", str(tmp_path)])
+    assert result.exit_code != 0
+
+
+@patch("note_analysis.agent.core.load_dotenv")
+def test_cli_env_file_option_passed_to_agent(mock_load_dotenv: MagicMock, tmp_path: Path) -> None:
+    """--env-file 选项应能被 Agent 接收"""
+    from note_analysis.agent.core import Agent
+    from note_analysis.models.models import Exam
+    from note_analysis.models.serializer import Serializer
+
+    env_file = tmp_path / ".env.test"
+    env_file.write_text("LLM_API_KEY=key", encoding="utf-8")
+    (tmp_path / "photo.jpg").write_text("data")
+
+    runner = CliRunner()
+    runner.invoke(cli, ["--env-file", str(env_file), "init", str(tmp_path)])
+
+    json_files = Serializer.find_exam_files(tmp_path)
+    assert len(json_files) == 1

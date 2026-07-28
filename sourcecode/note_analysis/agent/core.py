@@ -3,12 +3,14 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from dotenv import load_dotenv
 
 
 class Agent:
     """AI Agent 编排层核心
 
     管理 LLM 调用（Anthropic Messages API 兼容协议）、上下文窗口、Skill 加载。
+    支持通过 .env 文件或环境变量配置 LLM_API_KEY 和 LLM_API_URL。
     """
 
     def __init__(
@@ -17,7 +19,10 @@ class Agent:
         api_url: str | None = None,
         model: str = "claude-sonnet-4-20250514",
         max_tokens: int = 4096,
+        dotenv_path: str | Path | None = None,
     ):
+        if dotenv_path is not None:
+            load_dotenv(dotenv_path)
         self.api_key = api_key or os.environ.get("LLM_API_KEY", "")
         self.api_url = (api_url or os.environ.get("LLM_API_URL", "")).rstrip("/")
         self.model = model

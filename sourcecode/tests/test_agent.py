@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -104,3 +105,23 @@ def test_execute_skill(mock_call: MagicMock, tmp_path: Path) -> None:
     agent = Agent(api_key="test")
     result = agent.execute_skill(str(skill_file), "Some context")
     assert result == "Skill executed"
+
+
+@patch("note_analysis.agent.core.load_dotenv")
+def test_agent_loads_dotenv(mock_load_dotenv: MagicMock) -> None:
+    Agent(api_key="test", dotenv_path="/fake/.env")
+    mock_load_dotenv.assert_called_once_with("/fake/.env")
+
+
+@patch("note_analysis.agent.core.load_dotenv")
+def test_agent_skips_dotenv_when_not_provided(mock_load_dotenv: MagicMock) -> None:
+    Agent(api_key="test")
+    mock_load_dotenv.assert_not_called()
+
+
+@patch("note_analysis.agent.core.load_dotenv")
+def test_agent_uses_api_key_from_env_after_dotenv(mock_load_dotenv: MagicMock) -> None:
+    mock_load_dotenv.side_effect = lambda p: os.environ.update({"LLM_API_KEY": "env-file-key"})
+    agent = Agent(dotenv_path="/fake/.env")
+    assert agent.api_key == "env-file-key"
+    os.environ.pop("LLM_API_KEY", None)
