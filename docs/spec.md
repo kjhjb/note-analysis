@@ -2,17 +2,17 @@
 
 ## Problem Statement
 
-高中学生在日常刷题、整理试卷时，面对大量带有红笔批注的卷子，需要一种自动化的方式将物理和数学试卷整理成清晰的电子笔记。现有方案要么需要手动录入（耗时），要么 OCR 对公式和手写红字识别效果差，更无法跨卷分析薄弱环节。
+高中学生在日常刷题、整理试卷时，面对大量带有红笔批注、错题标记和圈划重点的卷子，需要一种自动化的方式将物理和数学试卷整理成清晰的电子笔记。现有方案要么需要手动录入（耗时），要么 OCR 对公式和手写红字识别效果差，更无法跨卷分析薄弱环节。
 
-学生需要一个工具：拍试卷 → 自动框选大题 → 识别黑字原题和红字笔记 → 处理字迹不清处 → 生成手写风格笔记 HTML → 跨卷分析薄弱点，全流程在本地完成，数据隐私可控。
+学生需要一个工具：拍试卷 → 自动框选大题 → 识别黑字原题、红字笔记、错题标记和圈划重点 → 处理字迹不清处 → 生成错题修正解答 → 生成手写风格笔记 HTML → 跨卷分析薄弱点（仅统计错题），全流程在本地完成，数据隐私可控。
 
 ## Solution
 
 一个 Python CLI 工具（AI Agent 内核 + 传统 CV 辅助），处理流程如下：
 
 ```
-拍照(单张或多张) → CV框选大题 → Web UI微调 → LLM识别(黑字/红字/公式)
-  → 不确定区域确认 → 合理性审查 → 学霸笔记风格HTML渲染 → 跨卷薄弱点分析
+拍照(单张或多张) → CV框选大题 → Web UI微调 → LLM识别(黑字/红字/错题标记/圈划重点/公式)
+  → 不确定区域确认 → 合理性审查 → 错题修正解答生成 → 学霸笔记风格HTML渲染 → 跨卷薄弱点分析(仅统计错题)
 ```
 
 核心特色：
@@ -20,7 +20,10 @@
 - **AI Agent 编排**：所有 LLM 相关操作由统一 Agent 框架编排，共享上下文
 - **学霸笔记风格输出**：参考"学霸笔记"skill 的手写风 HTML 渲染
 - **渐进式确认**：低置信度区域统一列出让用户确认，避免误识别
-- **跨卷积累**：多份试卷 JSON 本地存储，支持知识点错误频次统计和 LLM 建议
+- **错题标记识别**：自动识别试卷中的打叉（×）、画斜线（\）等错误标记，区分对错
+- **圈划重点提取**：识别被圆圈、下划线、高亮标注的关键内容
+- **AI 生成修正解答**：为错题自动生成详细的正确解答和错误分析
+- **跨卷积累**：多份试卷 JSON 本地存储，支持知识点错误频次统计（仅统计被识别的错题）和 LLM 建议
 
 ## User Stories
 
@@ -41,6 +44,10 @@
 15. 作为学生，我想要 LLM 基于薄弱点生成提升建议（使用高中物数专有名词），以便针对性复习
 16. 作为学生，我想要文件按 `笔记_YYYYMMDD_HHmm.{json,html}` 自动命名，以便按时间管理
 17. 作为学生，我想要整个流程通过一条命令启动，以便操作简单
+18. 作为学生，我想要系统自动识别被打了叉号或斜线的错题，以便我知道哪些题做错了
+19. 作为学生，我想要系统识别试卷上被圈划或高亮标记的重点内容，以便复习时聚焦关键
+20. 作为学生，我想要易错点总结只统计真正做错了的题目，以便分析结果更准确
+21. 作为学生，我想要系统为每道错题自动生成正确的解答和错误分析，以便直接对照学习
 
 ## Implementation Decisions
 
@@ -56,13 +63,14 @@
    - LLM 调用管理器（Anthropic Messages API 兼容，`/v1/messages` 端点）
    - 上下文窗口管理（整卷上下文传递给 LLM）
    - Skill 加载器（读取 SKILL.md 并按工作流执行）
-   - 所有 LLM 相关的 ticket（04, 05, 06, 07, 08）共用此模块
+   - 所有 LLM 相关的 ticket（04, 05, 06, 07, 08, 09）共用此模块
 
 2. **Data Models** (`models/`) — Pydantic 数据模型
    - `Exam`：试卷（exam_id, 照片路径列表, 框选区列表, 生成时间）
-   - `QuestionBox`：框选区（id, bbox[x,y,w,h], questionText, annotations, uncertainRegions, review）
+   - `QuestionBox`：框选区（id, bbox[x,y,w,h], questionText, annotations, isError, errorMarks, circledKeyPoints, circledRegions, uncertainRegions, review, correction）
    - `UncertainRegion`：不确定区域（bbox, llmGuess, userConfirmed）
    - `WeakPoint`：薄弱点（knowledgePoint, errorCount, llmAdvice）
+   - `BBox`：边界框
    - JSON 序列化/反序列化，文件命名为 `笔记_YYYYMMDD_HHmm.json`
 
 3. **CV Engine** (`cv/`) — 传统计算机视觉（纯 OpenCV，不涉及 LLM）
@@ -100,35 +108,41 @@
 class BBox(BaseModel):
     x: float
     y: float
-    w: float
-    h: float
+    w: float = Field(gt=0)
+    h: float = Field(gt=0)
 
 class UncertainRegion(BaseModel):
     bbox: BBox
     llmGuess: str          # LLM 原始猜测文本
-    llmConfidence: float    # 置信度 0~1
+    llmConfidence: float = Field(ge=0, le=1)  # 置信度 0~1
     userConfirmed: str | None = None  # 用户确认后填充
 
 class QuestionBox(BaseModel):
     id: int
     bbox: BBox
+    photoIndex: int = 0
     questionText: str = ""       # 黑色原题文字（含 LaTeX 标记）
     annotations: str = ""        # 红色笔记文字（含 LaTeX 标记）
     images: list[str] = []       # base64 或图片引用
     uncertainRegions: list[UncertainRegion] = []
-    reviewStatus: str = "pending"  # pending / consistent / inconsistent
+    reviewStatus: str = "pending"  # pending / consistent / inconsistent / uncertain
     reviewNotes: str = ""
+    isError: bool = False                    # 是否有打叉/斜线等错误标记
+    errorMarks: list[str] = []               # 错误标记类型列表 ["cross", "backslash"]
+    circledKeyPoints: str = ""               # 圈划/高亮标注的重点内容文字
+    circledRegions: list[BBox] = []          # 圈划区域的位置坐标
+    correction: str = ""                     # 错题修正解答（含正确解答和错误分析）
 
 class Exam(BaseModel):
     examId: str                  # 自动生成
     photos: list[str]            # 原始照片路径
     boxes: list[QuestionBox] = []
     createdAt: str               # YYYYMMDD_HHmm
-    weakPoints: list[dict] = []  # 仅跨卷分析时填充
+    weakPoints: list[WeakPoint] = []  # 仅跨卷分析时填充
 
 class WeakPoint(BaseModel):
     knowledgePoint: str
-    errorCount: int
+    errorCount: int = Field(ge=0)
     llmAdvice: str
 ```
 
@@ -138,10 +152,13 @@ class WeakPoint(BaseModel):
 main.py init <exam-dir>          # 扫描照片生成初始 JSON
 main.py box <exam-dir>           # CV 框选大题
 main.py serve <exam-dir>         # 启动 Web UI（框选微调 + 不确定确认）
-main.py recognize <exam-dir>     # Agent 调用 LLM 识别
+main.py recognize <exam-dir>     # Agent 调用 LLM 识别（含错题标记和圈划重点）
+main.py uncertain <exam-dir>     # Agent 调用 LLM 精化不确定区域
 main.py review <exam-dir>        # Agent 调用 LLM 合理性审查
+main.py correct <exam-dir>       # Agent 调用 LLM 为错题生成修正解答
 main.py render <exam-dir>        # Agent 调用学霸笔记 skill 渲染 HTML
-main.py analyze <exams-dir>      # Agent 跨卷薄弱点分析
+main.py analyze <exams-dir>      # Agent 跨卷薄弱点分析（仅统计 isError=true 的错题）
+main.py pipeline <exam-dir>      # 一键流水线: init→box→recognize→uncertain→review→correct→render
 ```
 
 ## Testing Decisions
@@ -175,9 +192,15 @@ main.py analyze <exams-dir>      # Agent 跨卷薄弱点分析
 tests/
 ├── test_models.py          # 数据模型 + JSON 序列化
 ├── test_cv_engine.py       # CV 框选（需要测试图片 fixture）
-├── test_agent_prompt.py    # Agent Prompt 构造和响应解析
+├── test_agent.py           # Agent Core 基础功能
+├── test_recognizer.py      # 多模态识别（含错题标记和圈划重点）
+├── test_uncertainty.py     # 不确定区域精化
+├── test_review.py          # 一致性审查
+├── test_correction.py      # 错题修正解答生成
+├── test_analyzer.py        # 跨卷薄弱点分析
 ├── test_web_ui.py          # Web UI API 端点
 ├── test_renderer.py        # HTML 渲染输出验证
+├── test_cli.py             # CLI 子命令集成测试
 └── test_e2e.py             # 端到端流程（mock LLM）
 ```
 
@@ -185,7 +208,7 @@ tests/
 
 - **移动端 App**：当前为 CLI + Web UI，不开发 iOS / Android 客户端
 - **在线多人协作**：无用户系统、无云端同步、无团队功能
-- **试卷自动批改评分**：不判断学生答案对错，只识别内容
+- **自动批改评分**：识别错题标记（打叉/斜线）但不自主判断答案对错
 - **视频/手写输入**：仅支持静态图片输入
 - **非理科科目**：目前专注数学和物理，不扩展到语文/英语等文科
 - **自动化知识点图谱**：不做知识图谱可视化，仅做列表和文本建议
