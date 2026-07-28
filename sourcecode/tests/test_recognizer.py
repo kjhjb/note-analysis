@@ -103,20 +103,24 @@ def test_recognizer_prepare_boxes_data(exam_dir: Path) -> None:
 def test_recognizer_parse_response_valid() -> None:
     r = Recognizer(".")
     response = json.dumps({
-        "boxes": [
-            {
-                "id": 1,
-                "questionText": "求解方程 $x^2 + 2x + 1 = 0$",
-                "annotations": "使用公式法 $x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}$",
-                "uncertainRegions": [
-                    {
-                        "bbox": {"x": 10, "y": 20, "w": 100, "h": 30},
-                        "llmGuess": "可能文字",
-                        "llmConfidence": 0.65,
-                    }
-                ],
-            }
-        ]
+            "boxes": [
+                {
+                    "id": 1,
+                    "questionText": "求解方程 $x^2 + 2x + 1 = 0$",
+                    "annotations": "使用公式法 $x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}$",
+                    "isError": False,
+                    "errorMarks": [],
+                    "circledKeyPoints": "",
+                    "circledRegions": [],
+                    "uncertainRegions": [
+                        {
+                            "bbox": {"x": 10, "y": 20, "w": 100, "h": 30},
+                            "llmGuess": "可能文字",
+                            "llmConfidence": 0.65,
+                        }
+                    ],
+                }
+            ]
     })
 
     results = r._parse_response(response)
@@ -127,7 +131,7 @@ def test_recognizer_parse_response_valid() -> None:
 
 def test_recognizer_parse_response_markdown_wrapped() -> None:
     r = Recognizer(".")
-    response = "```json\n{\"boxes\": [{\"id\": 1, \"questionText\": \"test\"}]}\n```"
+    response = "```json\n{\"boxes\": [{\"id\": 1, \"questionText\": \"test\", \"isError\": false, \"errorMarks\": [], \"circledKeyPoints\": \"\", \"circledRegions\": [], \"uncertainRegions\": []}]}\n```"
 
     results = r._parse_response(response)
     assert len(results) == 1
@@ -155,12 +159,20 @@ def test_recognizer_update_exam(exam_dir: Path) -> None:
             "id": 1,
             "questionText": "Question 1 content",
             "annotations": "Note 1 content",
+            "isError": False,
+            "errorMarks": [],
+            "circledKeyPoints": "重点公式",
+            "circledRegions": [{"x": 5, "y": 5, "w": 30, "h": 15}],
             "uncertainRegions": [],
         },
         {
             "id": 2,
             "questionText": "Question 2 content",
             "annotations": "Note 2 content",
+            "isError": True,
+            "errorMarks": ["cross"],
+            "circledKeyPoints": "",
+            "circledRegions": [],
             "uncertainRegions": [
                 {
                     "bbox": {"x": 0, "y": 0, "w": 100, "h": 50},
@@ -175,8 +187,14 @@ def test_recognizer_update_exam(exam_dir: Path) -> None:
 
     assert exam.boxes[0].questionText == "Question 1 content"
     assert exam.boxes[0].annotations == "Note 1 content"
+    assert exam.boxes[0].isError is False
+    assert exam.boxes[0].errorMarks == []
+    assert exam.boxes[0].circledKeyPoints == "重点公式"
+    assert len(exam.boxes[0].circledRegions) == 1
     assert len(exam.boxes[0].uncertainRegions) == 0
     assert exam.boxes[1].questionText == "Question 2 content"
+    assert exam.boxes[1].isError is True
+    assert exam.boxes[1].errorMarks == ["cross"]
     assert len(exam.boxes[1].uncertainRegions) == 1
     assert exam.boxes[1].uncertainRegions[0].llmGuess == "模糊文字"
     assert exam.boxes[1].uncertainRegions[0].llmConfidence == 0.6
@@ -186,7 +204,7 @@ def test_recognizer_update_exam_stores_images(exam_dir: Path) -> None:
     r = Recognizer(exam_dir)
     exam = r._load_exam()
 
-    results = [{"id": 1, "questionText": "Q1", "annotations": "", "uncertainRegions": []}]
+    results = [{"id": 1, "questionText": "Q1", "annotations": "", "isError": False, "errorMarks": [], "circledKeyPoints": "", "circledRegions": [], "uncertainRegions": []}]
 
     boxes_data = [{"id": 1, "image_base64": "dGVzdA=="}]
     r._update_exam(exam, results, boxes_data)
@@ -205,6 +223,10 @@ def test_recognizer_update_exam_high_confidence_not_uncertain() -> None:
             "id": 1,
             "questionText": "text",
             "annotations": "",
+            "isError": False,
+            "errorMarks": [],
+            "circledKeyPoints": "",
+            "circledRegions": [],
             "uncertainRegions": [
                 {
                     "bbox": {"x": 0, "y": 0, "w": 10, "h": 10},
@@ -223,7 +245,7 @@ def test_recognizer_update_exam_skips_unknown_boxes(exam_dir: Path) -> None:
     r = Recognizer(exam_dir)
     exam = r._load_exam()
 
-    results = [{"id": 999, "questionText": "ghost", "annotations": "", "uncertainRegions": []}]
+    results = [{"id": 999, "questionText": "ghost", "annotations": "", "isError": False, "errorMarks": [], "circledKeyPoints": "", "circledRegions": [], "uncertainRegions": []}]
 
     r._update_exam(exam, results, [])
 
@@ -243,12 +265,20 @@ def test_recognizer_recognize(mock_post: MagicMock, exam_dir: Path) -> None:
                             "id": 1,
                             "questionText": "求解方程 $x^2=4$",
                             "annotations": "$x=\\pm 2$",
+                            "isError": False,
+                            "errorMarks": [],
+                            "circledKeyPoints": "平方根性质",
+                            "circledRegions": [{"x": 10, "y": 10, "w": 50, "h": 20}],
                             "uncertainRegions": [],
                         },
                         {
                             "id": 2,
                             "questionText": "三角函数",
                             "annotations": "",
+                            "isError": True,
+                            "errorMarks": ["cross"],
+                            "circledKeyPoints": "",
+                            "circledRegions": [],
                             "uncertainRegions": [],
                         },
                     ]
@@ -264,6 +294,11 @@ def test_recognizer_recognize(mock_post: MagicMock, exam_dir: Path) -> None:
     assert exam.boxes[0].questionText == "求解方程 $x^2=4$"
     assert exam.boxes[0].annotations == "$x=\\pm 2$"
     assert exam.boxes[1].questionText == "三角函数"
+    assert exam.boxes[0].isError is False
+    assert exam.boxes[1].isError is True
+    assert exam.boxes[1].errorMarks == ["cross"]
+    assert exam.boxes[0].circledKeyPoints == "平方根性质"
+    assert len(exam.boxes[0].circledRegions) == 1
 
 
 @patch("note_analysis.agent.core.httpx.Client.post")
@@ -279,6 +314,10 @@ def test_recognizer_recognize_low_confidence(mock_post: MagicMock, exam_dir: Pat
                             "id": 1,
                             "questionText": "已知函数 $f(x)$",
                             "annotations": "",
+                            "isError": False,
+                            "errorMarks": [],
+                            "circledKeyPoints": "",
+                            "circledRegions": [],
                             "uncertainRegions": [
                                 {
                                     "bbox": {"x": 10, "y": 20, "w": 80, "h": 30},
@@ -315,6 +354,10 @@ def test_recognizer_recognize_saves_json(mock_post: MagicMock, exam_dir: Path) -
                             "id": 1,
                             "questionText": "Q1",
                             "annotations": "A1",
+                            "isError": False,
+                            "errorMarks": [],
+                            "circledKeyPoints": "",
+                            "circledRegions": [],
                             "uncertainRegions": [],
                         }
                     ]

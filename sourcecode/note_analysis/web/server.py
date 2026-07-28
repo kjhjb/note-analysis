@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import socket
 import sys
@@ -11,6 +12,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
 
+from note_analysis.agent.recognizer import crop_bbox_from_image, image_to_base64
 from note_analysis.models.models import BBox, Exam, QuestionBox
 from note_analysis.models.serializer import Serializer
 
@@ -283,6 +285,11 @@ document.getElementById('addBtn').addEventListener('click', function() {{
     uncertainRegions: [],
     reviewStatus: 'pending',
     reviewNotes: '',
+    isError: false,
+    errorMarks: [],
+    circledKeyPoints: '',
+    circledRegions: [],
+    correction: '',
   }};
   state.allBoxes.push(newBox);
   state.selectedBoxId = newBox.id;
@@ -608,8 +615,6 @@ def _create_app(exam: Exam, exam_dir: Path) -> FastAPI:
             if box.id != box_id:
                 continue
             if 0 <= ur_index < len(box.uncertainRegions):
-                from note_analysis.agent.recognizer import crop_bbox_from_image, image_to_base64
-
                 ur = box.uncertainRegions[ur_index]
                 orig_bbox = BBox(
                     x=box.bbox.x + ur.bbox.x,
@@ -619,8 +624,6 @@ def _create_app(exam: Exam, exam_dir: Path) -> FastAPI:
                 )
                 cropped = crop_bbox_from_image(exam.photos[box.photoIndex], orig_bbox)
                 b64 = image_to_base64(cropped)
-                import base64
-
                 decoded = base64.b64decode(b64)
                 return Response(content=decoded, media_type="image/jpeg")
         raise HTTPException(status_code=404, detail="Uncertain region not found")

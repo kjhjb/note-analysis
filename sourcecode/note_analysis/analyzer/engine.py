@@ -14,9 +14,12 @@ SYSTEM_PROMPT = (
     "你将收到多份试卷的题目内容和学生笔记批注。\n\n"
     "请分析这些试卷，完成以下任务：\n"
     "1. 提取所有涉及的知识点（使用高中数学、物理的标准专有名词，如「三角函数」「牛顿第二定律」「导数与单调性」等）\n"
-    "2. 对每个知识点，统计有多少道题涉及该知识点，以及其中有多少道题可能存在理解问题\n"
-    "   （判断依据：笔记中有解题过程、reviewStatus 为 inconsistent 或 uncertain、有不确定区域等）\n"
+    "2. 对每个知识点，统计有多少道题涉及该知识点，以及其中有多少道题是错误的\n"
+    "   （判断依据：只统计 isError=true 的题目，即试卷中被打了叉号或斜线标记为错误的题目）\n"
+    "   - reviewStatus 为 inconsistent 或 uncertain 可作为辅助参考\n"
+    "   - 但最终只统计 isError=true 的题目作为错误题目\n"
     "3. 基于错误频次为每个知识点生成针对性的提升建议\n\n"
+    "   ！！！重要：请严格按照每道题的 isError 字段来判断是否为错误题，不要自行猜测或推断。！！！\n\n"
     "只返回 JSON，不包含其他文字。\n"
     '格式：{"weakPoints": [{"knowledgePoint": "<知识点名称>", "errorCount": <整数>, '
     '"llmAdvice": "<提升建议（使用高中数理专有名词）>"}]}'
@@ -66,6 +69,11 @@ class Analyzer:
                 parts.append(f"原题: {box.questionText or '(空)'}")
                 parts.append(f"笔记: {box.annotations or '(无)'}")
                 parts.append(f"审查状态: {box.reviewStatus}")
+                parts.append(f"isError: {box.isError}  (是否有错误标记)")
+                if box.errorMarks:
+                    parts.append(f"错误标记: {', '.join(box.errorMarks)}")
+                if box.isError:
+                    parts.append("(本题有错误标记，应计入易错点统计)")
                 if box.reviewNotes:
                     parts.append(f"审查备注: {box.reviewNotes}")
                 if box.uncertainRegions:
@@ -107,16 +115,15 @@ class Analyzer:
 
     @staticmethod
     def _update_exams(exams: list[Exam], results: list[dict[str, Any]]) -> None:
-        weak_points = [
-            WeakPoint(
-                knowledgePoint=r.get("knowledgePoint", ""),
-                errorCount=r.get("errorCount", 0),
-                llmAdvice=r.get("llmAdvice", ""),
-            )
-            for r in results
-        ]
         for exam in exams:
-            exam.weakPoints = weak_points
+            exam.weakPoints = [
+                WeakPoint(
+                    knowledgePoint=r.get("knowledgePoint", ""),
+                    errorCount=r.get("errorCount", 0),
+                    llmAdvice=r.get("llmAdvice", ""),
+                )
+                for r in results
+            ]
 
     def _save_exams(self, exams: list[Exam]) -> None:
         for exam in exams:

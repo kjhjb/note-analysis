@@ -142,6 +142,27 @@ def review(exam_dir: Path) -> None:
 
 @cli.command()
 @click.argument("exam_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
+def correct(exam_dir: Path) -> None:
+    """Agent 调用 LLM 为错题生成修正解答"""
+    from note_analysis.agent.correction import Corrector
+
+    try:
+        c = Corrector(exam_dir)
+        exam = c.correct()
+        corrected_count = sum(1 for b in exam.boxes if b.correction and b.isError)
+        click.echo(f"修正完成: {corrected_count} 道错题已生成修正解答")
+        if not corrected_count:
+            click.echo("没有标记为错误的题目，无需修正")
+    except FileNotFoundError as e:
+        click.echo(f"错误: {e}", err=True)
+        sys.exit(1)
+    except ValueError as e:
+        click.echo(f"修正错误: {e}", err=True)
+        sys.exit(1)
+
+
+@cli.command()
+@click.argument("exam_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
 @click.option(
     "--open/--no-open",
     "open_browser",
@@ -184,6 +205,110 @@ def analyze(exams_dir: Path) -> None:
     except (FileNotFoundError, ValueError) as e:
         click.echo(f"错误: {e}", err=True)
         sys.exit(1)
+
+
+@cli.command()
+@click.argument("exam_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.option(
+    "--threshold",
+    default=0.8,
+    type=float,
+    help="置信度阈值（默认 0.8）",
+)
+@click.option(
+    "--open/--no-open",
+    "open_browser",
+    default=True,
+    help="渲染后自动打开浏览器（默认打开）",
+)
+def pipeline(exam_dir: Path, threshold: float, open_browser: bool) -> None:
+    """一键执行完整流水线: init → box → recognize → uncertain → review → correct → render"""
+    from note_analysis.agent.recognizer import Recognizer
+    from note_analysis.agent.review import Reviewer
+    from note_analysis.agent.uncertainty import UncertaintyResolver
+    from note_analysis.cv.engine import CVEngine
+    from note_analysis.models.serializer import Serializer
+    from note_analysis.renderer.engine import NoteRenderer
+
+    click.echo("=== 步骤 1/7: init — 扫描照片 ===")
+    image_extensions = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff"}
+    photos: list[str] = []
+    for f in sorted(exam_dir.iterdir()):
+        if f.is_file() and f.suffix.lower() in image_extensions:
+            photos.append(str(f.resolve()))
+    if not photos:
+        click.echo(f"错误: 未在 {exam_dir} 中找到图片", err=True)
+        sys.exit(1)
+    exam = Exam.create(photos)
+    Serializer.save(exam, exam_dir)
+    click.echo(f"  已扫描 {len(photos)} 张图片")
+
+    click.echo("=== 步骤 2/7: box — CV 框选大题 ===")
+    try:
+        CVEngine.process_exam(exam_dir)
+        click.echo("  框选完成")
+    except FileNotFoundError as e:
+        click.echo(f"错误: {e}", err=True)
+        sys.exit(1)
+
+    click.echo("=== 步骤 3/7: recognize — LLM 识别 ===")
+    try:
+        rec = Recognizer(exam_dir, threshold=threshold)
+        exam = rec.recognize()
+        uncertain_count = sum(len(b.uncertainRegions) for b in exam.boxes)
+        click.echo(f"  识别完成: {len(exam.boxes)} 道题, {uncertain_count} 个不确定区域")
+    except (FileNotFoundError, ValueError) as e:
+        click.echo(f"错误: {e}", err=True)
+        sys.exit(1)
+
+    click.echo("=== 步骤 4/7: uncertain — 不确定区域处理 ===")
+    try:
+        unc = UncertaintyResolver(exam_dir)
+        exam = unc.resolve()
+        total = sum(len(b.uncertainRegions) for b in exam.boxes)
+        click.echo(f"  处理完成: {total} 个区域")
+        if total:
+            click.echo("  ! 请运行 `note-analysis serve <dir>` 在 Web UI 中确认不确定区域")
+    except (FileNotFoundError, ValueError) as e:
+        click.echo(f"错误: {e}", err=True)
+        sys.exit(1)
+
+    click.echo("=== 步骤 5/7: review — 合理性审查 ===")
+    try:
+        json_files = Serializer.find_exam_files(exam_dir)
+        exam = Serializer.load(json_files[0]) if json_files else exam
+        if not UncertaintyResolver.all_confirmed(exam):
+            click.echo("  ! 跳过审查: 尚有不确定区域未确认", err=True)
+        else:
+            rev = Reviewer(exam_dir)
+            exam = rev.review()
+            click.echo(f"  审查完成: {len(exam.boxes)} 道题")
+    except (FileNotFoundError, ValueError) as e:
+        click.echo(f"错误: {e}", err=True)
+        sys.exit(1)
+
+    click.echo("=== 步骤 6/7: correct — 错题修正 ===")
+    try:
+        from note_analysis.agent.correction import Corrector
+
+        corr = Corrector(exam_dir)
+        exam = corr.correct()
+        corrected_count = sum(1 for b in exam.boxes if b.correction and b.isError)
+        click.echo(f"  修正完成: {corrected_count} 道错题")
+    except (FileNotFoundError, ValueError) as e:
+        click.echo(f"错误: {e}", err=True)
+        sys.exit(1)
+
+    click.echo("=== 步骤 7/7: render — HTML 渲染 ===")
+    try:
+        rend = NoteRenderer(exam_dir)
+        output_path = rend.save(open_browser=open_browser)
+        click.echo(f"  HTML 笔记已生成: {output_path}")
+    except (FileNotFoundError, ValueError) as e:
+        click.echo(f"错误: {e}", err=True)
+        sys.exit(1)
+
+    click.echo("=== 流水线完成 ===")
 
 
 def main() -> None:

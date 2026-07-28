@@ -21,12 +21,17 @@ SYSTEM_PROMPT = (
     "对于每道大题区域，请识别：\n"
     "1. questionText: 黑色印刷文字（原题内容），包含所有题目文字和公式\n"
     "2. annotations: 红色手写笔记文字（学生的批注、解题过程）\n"
-    "3. uncertainRegions: 你不太确定的文字区域列表\n\n"
+    "3. isError: 该题目是否有打叉（×）、画斜线（\\）等表示错误的标记，true 或 false\n"
+    "4. errorMarks: 检测到的具体错误标记类型列表，如 [\"cross\"] 或 [\"backslash\"]，空列表表示无错误\n"
+    "5. circledKeyPoints: 被圆圈、下划线、高亮等标记出来的重点内容文字（若无则为空字符串）\n"
+    "6. circledRegions: 圈划区域的位置坐标列表（每个元素含 x, y, w, h），若无可为空列表\n"
+    "7. uncertainRegions: 你不太确定的文字区域列表\n\n"
     "要求：\n"
     "- 数学和物理公式用 LaTeX 语法标记（$...$ 行内，$$...$$ 独立）\n"
     "- 对每个文字区域给出置信度评分（0.0~1.0）\n"
     "- 置信度低于 0.8 的区域要标记为 uncertainRegions\n"
-    "- uncertainRegions 的 bbox 坐标相对于裁剪图片\n\n"
+    "- uncertainRegions 的 bbox 坐标相对于裁剪图片\n"
+    "- circledRegions 的 bbox 坐标相对于裁剪图片\n\n"
     "只返回 JSON，不包含其他文字。"
 )
 
@@ -111,8 +116,14 @@ class Recognizer:
             "type": "text",
             "text": (
                 '\n请按以下 JSON 格式返回：\n'
-                '{"boxes": [{"id": <int>, "questionText": "<str>", '
+                '{"boxes": ['
+                '{"id": <int>, "questionText": "<str>", '
                 '"annotations": "<str>", '
+                '"isError": <bool>, '
+                '"errorMarks": ["<str>", ...], '
+                '"circledKeyPoints": "<str>", '
+                '"circledRegions": [{"x": <float>, "y": <float>, '
+                '"w": <float>, "h": <float>}], '
                 '"uncertainRegions": [{"bbox": {"x": <float>, "y": <float>, '
                 '"w": <float>, "h": <float>}, "llmGuess": "<str>", '
                 '"llmConfidence": <float>}]}]}'
@@ -160,6 +171,16 @@ class Recognizer:
 
             box.questionText = result.get("questionText", "")
             box.annotations = result.get("annotations", "")
+
+            box.isError = result.get("isError", False)
+            box.errorMarks = result.get("errorMarks", [])
+            box.circledKeyPoints = result.get("circledKeyPoints", "")
+
+            circled_bboxes = result.get("circledRegions", [])
+            box.circledRegions = [
+                BBox(x=cb.get("x", 0), y=cb.get("y", 0), w=cb.get("w", 0), h=cb.get("h", 0))
+                for cb in circled_bboxes
+            ]
 
             img_b64 = image_map.get(box.id, "")
             if img_b64:

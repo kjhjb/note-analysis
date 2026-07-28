@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import json
 import os
+import re
 import sys
 import webbrowser
 from pathlib import Path
@@ -45,7 +46,11 @@ class NoteRenderer:
 
     @staticmethod
     def _escape(text: str) -> str:
-        return html.escape(text, quote=False)
+        math_re = re.compile(r'(\$\$.*?\$\$|\\\(.*?\\\))', re.DOTALL)
+        parts = math_re.split(text)
+        for i in range(0, len(parts), 2):
+            parts[i] = html.escape(parts[i], quote=False)
+        return "".join(parts)
 
     def _build_question_section(self, box: QuestionBox, base_delay: float) -> str:
         parts: list[str] = []
@@ -71,6 +76,35 @@ class NoteRenderer:
             parts.append(
                 f'<div class="content write-in red-text" style="animation-delay:{delay:.1f}s">'
                 f'<span class="badge orange">笔记</span> {ann}</div>'
+            )
+
+        if box.errorMarks:
+            delay += 0.1
+            marks_display = "、".join(
+                "✗" if m == "cross" else "╱" if m == "backslash" else m
+                for m in box.errorMarks
+            )
+            parts.append(
+                f'<div class="content write-in" style="animation-delay:{delay:.1f}s">'
+                f'<span class="badge red">错题标记</span> '
+                f'<span style="color:#ff4d4f;font-weight:600;">{marks_display}</span></div>'
+            )
+
+        if box.circledKeyPoints:
+            delay += 0.1
+            ckp = self._escape(box.circledKeyPoints)
+            parts.append(
+                f'<div class="content write-in" style="animation-delay:{delay:.1f}s">'
+                f'<span class="badge blue">圈划重点</span> {ckp}</div>'
+            )
+
+        if box.correction:
+            delay += 0.1
+            corr = self._escape(box.correction)
+            corr_html = corr.replace("\n", "<br>")
+            parts.append(
+                f'<div class="content write-in correction-box" style="animation-delay:{delay:.1f}s">'
+                f'<span class="badge green">修正</span><br>{corr_html}</div>'
             )
 
         for img_b64 in box.images:
@@ -161,6 +195,9 @@ class NoteRenderer:
             html_content = html_content + generated_content
 
         mathjax_script = (
+            '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">'
+            '<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js">'
+            "</script>"
             '<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js">'
             "</script>"
         )

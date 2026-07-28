@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 NOTE_PREFIX = "笔记_"
 
@@ -11,14 +11,14 @@ NOTE_PREFIX = "笔记_"
 class BBox(BaseModel):
     x: float
     y: float
-    w: float
-    h: float
+    w: float = Field(gt=0)
+    h: float = Field(gt=0)
 
 
 class UncertainRegion(BaseModel):
     bbox: BBox
     llmGuess: str
-    llmConfidence: float
+    llmConfidence: float = Field(ge=0, le=1)
     userConfirmed: str | None = None
 
 
@@ -32,6 +32,11 @@ class QuestionBox(BaseModel):
     uncertainRegions: list[UncertainRegion] = []
     reviewStatus: Literal["pending", "consistent", "inconsistent", "uncertain"] = "pending"
     reviewNotes: str = ""
+    isError: bool = False
+    errorMarks: list[str] = []
+    circledKeyPoints: str = ""
+    circledRegions: list[BBox] = []
+    correction: str = ""
 
 
 class Exam(BaseModel):
@@ -58,5 +63,5 @@ class Exam(BaseModel):
 
 class WeakPoint(BaseModel):
     knowledgePoint: str
-    errorCount: int
+    errorCount: int = Field(ge=0)
     llmAdvice: str

@@ -23,7 +23,8 @@ def single_exam_dir(tmp_path: Path) -> Path:
         QuestionBox(id=2, bbox=BBox(x=0, y=0, w=100, h=100),
                      questionText="求方程 2x+3=7 的解",
                      annotations="x=2",
-                     reviewStatus="inconsistent", reviewNotes="计算有误"),
+                     reviewStatus="inconsistent", reviewNotes="计算有误",
+                     isError=True, errorMarks=["cross"]),
     ]
     Serializer.save(exam, tmp_path)
     return tmp_path
@@ -42,7 +43,8 @@ def multi_exam_dir(tmp_path: Path) -> Path:
         QuestionBox(id=2, bbox=BBox(x=0, y=0, w=100, h=100),
                      questionText="已知 F=ma，求 a",
                      annotations="a=F/m",
-                     reviewStatus="inconsistent", reviewNotes="公式写反"),
+                     reviewStatus="inconsistent", reviewNotes="公式写反",
+                     isError=True, errorMarks=["cross"]),
     ]
     Serializer.save(exam1, tmp_path)
 
@@ -53,7 +55,8 @@ def multi_exam_dir(tmp_path: Path) -> Path:
         QuestionBox(id=1, bbox=BBox(x=0, y=0, w=100, h=100),
                      questionText="求函数 y=2x+1 的斜率",
                      annotations="k=2",
-                     reviewStatus="inconsistent", reviewNotes="误写为 1/2"),
+                     reviewStatus="inconsistent", reviewNotes="误写为 1/2",
+                     isError=True, errorMarks=["cross"]),
     ]
     Serializer.save(exam2, tmp_path)
 
@@ -104,6 +107,17 @@ def test_build_summary_contains_review_status(single_exam_dir: Path) -> None:
     summary = a._build_summary(exams)
     assert "consistent" in summary
     assert "inconsistent" in summary
+    assert "isError" in summary
+    assert "cross" in summary
+
+
+def test_build_summary_contains_isError_info(single_exam_dir: Path) -> None:
+    a = Analyzer(single_exam_dir)
+    exams = a._load_all_exams()
+    summary = a._build_summary(exams)
+    assert "isError: True" in summary
+    assert "isError: False" in summary
+    assert "应计入易错点统计" in summary
 
 
 def test_build_summary_multi_exams(multi_exam_dir: Path) -> None:
